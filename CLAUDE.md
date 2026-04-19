@@ -5,10 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```
-pip install -r requirements.txt           # pymupdf, Pillow
+pip install -r requirements.txt           # pymupdf
 python src/extract_cache_pdfs.py          # scan %LOCALAPPDATA%/Google/Chrome/User Data → ./extracted_pdfs/
 python src/extract_cache_pdfs.py --cache-dir <path> --out <dir> --min-size 4096
-python src/invert_pdf.py <pdf>...         # write <stem>.dark.pdf + <stem>.dark_hue.pdf to ./dark_pdfs/
+python src/convert_to_dark_mode.py <pdf>...  # write <stem>.dark.pdf to ./dark_pdfs/ (native, text-selectable)
 ```
 
 No test suite, linter, or formatter is configured. Python 3.9+ is required.
@@ -35,9 +35,17 @@ The non-obvious part is how `extract_cache_pdfs.py` recovers original filenames 
 
 Reference: Chromium's `disk_cache/blockfile/disk_format.h` — `BLOCK_SIZES`, `ENTRY_SIZE`, `KEY_INLINE_*`, and the `data_addr[1]` offset of 60 are all derived from that struct layout.
 
-`invert_pdf.py` is independent: rasterize each page via PyMuPDF → `PIL.ImageOps.invert`, with an optional HSV hue-rotate-180° variant that preserves the natural hue of colored figures after inversion. Both variants are always written.
+`convert_to_dark_mode.py` is independent and does **no rasterization**. For each page it layers four full-page filled rectangles into `/Contents`:
+
+1. **Prepended opaque white rect** (Normal blend). This step is non-obvious but load-bearing: a PDF page's transparency group has a transparent backdrop by default, and `Difference` blend mode against a transparent backdrop silently degrades to Normal (the overlay just replaces what's under it — everything collapses to a single grey). Prepending an opaque white rect gives the group something concrete to diff against. Do not remove this layer thinking it's a no-op.
+2. **Appended `Difference` rect, fill `#FFFFFF`** — inverts each channel: `P → 255 − P`.
+3. **Appended `Multiply` rect, fill `#CECECE`** — scales: `P → P · M / 255` with `M = 206`.
+4. **Appended `Screen` rect, fill `#1E1E1E`** — lifts the floor: `P → 255 − (255 − P)(255 − S)/255` with `S = 30`.
+
+Composed, layers 2–4 are algebraically identical to the per-channel LUT `new = BG + (255 − old) · (FG − BG) / 255` — so pure black maps to `#D4D4D4` and pure white to `#1E1E1E` (VS Code Dark+ `editor.foreground` / `editor.background`). Because the underlying content stream is never rewritten, text stays selectable, vectors stay vector, and embedded images keep their native bytes. Palette changes only require editing `VSCODE_BG` and `VSCODE_FG` at the top of the file; `_M` and `_S` are derived in closed form. Before layering the rects the page is run through `page.wrap_contents()` so existing graphics state can't leak into the overlay.
 
 ## Known limitations (do not "fix" without discussion)
 
 - Only the classic blockfile cache is parsed. The newer Simple Cache format is out of scope.
 - Inline-stored small PDFs get hash-prefixed names by design — there is no EntryStore back-reference available for them.
+- `convert_to_dark_mode.py` flips the hue of coloured content (red → cyan-ish, blue → orange-ish). PDF blend modes are per-channel linear and can't express HSV hue rotation. The previous `.dark_hue.pdf` raster variant that preserved hues is gone; if the flip turns out to hurt real-world readability, re-introduce it behind a `--hue-preserve` raster fallback flag rather than trying to emulate hue rotation in blend modes.

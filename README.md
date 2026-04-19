@@ -4,10 +4,11 @@ Carve PDFs out of Chrome's on-disk cache and save them with their **original
 filenames** — including non-ASCII (Chinese, Japanese, …) filenames that tools
 like ChromeCacheView display as `\uXXXX` escapes.
 
-Bundled with a companion tool, `invert_pdf.py`, that converts any PDF to a
-dark-mode version (black background, white text) — handy when the original
-asset is a white-background scan or a slide deck and you want to read it
-without the glare.
+Bundled with a companion tool, `convert_to_dark_mode.py`, that converts any
+PDF to a VS Code-style dark version (`#1E1E1E` background, `#D4D4D4`
+foreground) while keeping text selectable and vector graphics sharp — handy
+when the original asset is a white-background scan or a slide deck and you
+want to read it without the glare.
 
 ## Features
 
@@ -62,20 +63,41 @@ tool falls back to `<sha256-prefix>_<source>.pdf`.
 ### Dark-mode the PDFs (optional companion)
 
 ```
-python src/invert_pdf.py extracted_pdfs/*.pdf
+python src/convert_to_dark_mode.py extracted_pdfs/*.pdf
 ```
 
-For every input PDF, writes two variants into `./dark_pdfs/`:
+Writes `<stem>.dark.pdf` for each input into `./dark_pdfs/`.
 
-- `<stem>.dark.pdf`     — plain raster negate. Cleanest black/white for
-                          text-heavy content; colored hues get flipped.
-- `<stem>.dark_hue.pdf` — negate + 180° hue rotation. Coloured figures and
-                          circuit diagrams keep their natural hue.
+Colors are modelled on VS Code's Dark+ theme: pure black maps to `#D4D4D4`
+(`editor.foreground`) and pure white maps to `#1E1E1E` (`editor.background`),
+with everything in between remapped linearly. The result feels like reading
+the PDF inside the VS Code editor rather than staring at a flashlight.
+
+The remap happens **inside the PDF**, not by rasterizing pages. Three
+full-page rectangles with PDF blend modes (`Difference` → `Multiply` →
+`Screen`) are appended to each page; the viewer applies them at display time
+on top of the original, untouched content. That means:
+
+- **Text stays selectable** — drag-select / copy / paste works exactly like
+  the source.
+- **Vector graphics stay vector** — circuit diagrams and schematics stay
+  crisp at any zoom.
+- **Embedded images keep their native resolution** — no re-encode, no
+  quality loss.
+- Output file size tracks the source instead of ballooning into a pile of
+  page-sized PNGs.
+
+Known trade-off: coloured content has its hue flipped (red → cyan, blue →
+orange, etc.) because PDF blend modes are per-channel linear and can't do
+HSV hue rotation. For text-heavy scans and black-on-white circuit diagrams
+this is invisible; for colour-coded figures it is noticeable.
+
+Wildcards work on any shell — the script expands `*`/`?`/`[...]` itself, so
+`extracted_pdfs/*.pdf` behaves the same in PowerShell, cmd, and bash.
 
 Flags:
 
 - `--out-dir` (default `dark_pdfs`)
-- `--dpi`     (default `200`)
 
 ## How it works
 
