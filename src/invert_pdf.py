@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from glob import glob
 from io import BytesIO
 from pathlib import Path
 
@@ -66,7 +67,18 @@ def main() -> int:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    for src in args.inputs:
+    inputs: list[Path] = []
+    for raw in args.inputs:
+        s = str(raw)
+        if any(ch in s for ch in "*?["):
+            matched = sorted(glob(s))
+            if not matched:
+                print(f"skip (no match): {s}", file=sys.stderr)
+            inputs.extend(Path(m) for m in matched)
+        else:
+            inputs.append(raw)
+
+    for src in inputs:
         if not src.exists():
             print(f"skip (missing): {src}", file=sys.stderr)
             continue
