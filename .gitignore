@@ -1,0 +1,17 @@
+# output directories
+extracted_pdfs/
+dark_pdfs/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# misc
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
