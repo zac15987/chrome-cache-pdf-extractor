@@ -72,15 +72,47 @@ def _make_stream(doc: fitz.Document, body: bytes) -> int:
     return xref
 
 
+def _resolve_extgstate_target(doc: fitz.Document, page: fitz.Page) -> tuple[int, str]:
+    """Return (xref, prefix) such that xref_set_key(xref, prefix+name, ...) lands
+    a new entry inside the page's Resources/ExtGState dict.
+
+    xref_set_key cannot descend through indirect references, so when Resources
+    or ExtGState is an indirect ref we have to switch to that ref's xref and
+    operate there. Four combinations are possible.
+    """
+    rt, rv = doc.xref_get_key(page.xref, "Resources")
+    if rt == "xref":
+        res_xref, res_prefix = int(rv.split()[0]), ""
+    elif rt == "dict":
+        res_xref, res_prefix = page.xref, "Resources/"
+    elif rt == "null":
+        doc.xref_set_key(page.xref, "Resources", "<<>>")
+        res_xref, res_prefix = page.xref, "Resources/"
+    else:
+        raise RuntimeError(f"unexpected Resources type {rt!r}: {rv!r}")
+
+    eg_key = res_prefix + "ExtGState"
+    et, ev = doc.xref_get_key(res_xref, eg_key)
+    if et == "xref":
+        return int(ev.split()[0]), ""
+    if et == "dict":
+        return res_xref, eg_key + "/"
+    if et == "null":
+        doc.xref_set_key(res_xref, eg_key, "<<>>")
+        return res_xref, eg_key + "/"
+    raise RuntimeError(f"unexpected ExtGState type {et!r}: {ev!r}")
+
+
 def _append_dark_overlay(doc: fitz.Document, page: fitz.Page) -> None:
     """Prepend a white backdrop and append the three blend-mode rects."""
     if not page.is_wrapped:
         page.wrap_contents()
 
+    eg_xref, eg_prefix = _resolve_extgstate_target(doc, page)
     for name, bm in _EXTGSTATES:
         doc.xref_set_key(
-            page.xref,
-            f"Resources/ExtGState/{name}",
+            eg_xref,
+            eg_prefix + name,
             f"<< /Type /ExtGState /BM /{bm} >>",
         )
 
